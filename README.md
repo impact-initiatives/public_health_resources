@@ -14,6 +14,7 @@ Core functionality covers:
 ## Installation
 
 The package is not yet on CRAN. Install the development version directly from GitHub using the [remotes](https://remotes.r-lib.org/) package:
+This version will allow for testing in shiny apps or other environments.
 
 ```r
 # install.packages("remotes")
