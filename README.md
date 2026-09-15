@@ -16,9 +16,18 @@ Core functionality covers:
 The package is not yet on CRAN. Install the development version directly from GitHub using the [remotes](https://remotes.r-lib.org/) package:
 This version will allow for testing in shiny apps or other environments.
 
+### From the main branch
+
 ```r
 # install.packages("remotes")
 remotes::install_github("impact-initiatives/public_health_resources")
+```
+
+### From the copilot/amend-readme-install-instruction branch
+
+```r
+# install.packages("remotes")
+remotes::install_github("impact-initiatives/public_health_resources", ref = "copilot/develop-quant_data_pipeline")
 ```
 
 Then load the package:

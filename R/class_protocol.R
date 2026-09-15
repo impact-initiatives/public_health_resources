@@ -31,22 +31,23 @@
 #'
 #' @section Key methods:
 #' \describe{
-#'   \item{`initialize()`}{Create a new protocol object.}
-#'   \item{`add_tools()`}{Add a tool object to the protocol.}
-#'   \item{`get_tool_names()`}{Return registered tool names.}
-#'   \item{`is_tool_included()`}{Check whether a tool is registered.}
-#'   \item{`validate_objective_schema()`}{Validate an objective schema.}
-#'   \item{`diagnose_coherence()`}{Check alignment between framework indicators and tool indicators.}
-#'   \item{`get_dap_table()`}{Build a data analysis plan table for a selected tool.}
-#'   \item{`get_quarto_params()`}{Return protocol parameters for Quarto rendering.}
+#'   \item{\code{initialize()}}{Create a new protocol object.}
+#'   \item{\code{add_tools()}}{Add a tool object to the protocol.}
+#'   \item{\code{remove_tools()}}{Remove a tool from the protocol safely.}
+#'   \item{\code{get_tool_names()}}{Return registered tool names.}
+#'   \item{\code{is_tool_included()}}{Check whether a tool is registered.}
+#'   \item{\code{validate_objective_schema()}}{Validate an objective schema.}
+#'   \item{\code{diagnose_coherence()}}{Check alignment between framework indicators and tool indicators.}
+#'   \item{\code{get_dap_table()}}{Build a data analysis plan table for a selected tool.}
+#'   \item{\code{get_quarto_params()}}{Return protocol parameters for Quarto rendering.}
 #' }
 #'
 #' @section Active bindings:
 #' \describe{
-#'   \item{`.release_date`}{Read-only binding returning the current system date.}
-#'   \item{`.objectives_research_questions_df`}{Returns a table of pillars, sub-pillars, objectives, and research questions linked to indicators used across tools.}
-#'   \item{`.secondary_data_sources_df`}{Returns the framework secondary data sources table.}
-#'   \item{`.modified_framework_svg`}{Returns a temporary SVG file path for the adjusted or master framework diagram.}
+#'   \item{\code{.release_date}}{Read-only binding returning the current system date.}
+#'   \item{\code{.objectives_research_questions_df}}{Returns a table of pillars, sub-pillars, objectives, and research questions linked to indicators used across tools.}
+#'   \item{\code{.secondary_data_sources_df}}{Returns the framework secondary data sources table.}
+#'   \item{\code{.modified_framework_svg}}{Returns a temporary SVG file path for the adjusted or master framework diagram.}
 #' }
 #'
 #' @examples
@@ -169,7 +170,8 @@ Protocol <- R6::R6Class(
       num_dashboard = NULL,
       num_webmap = NULL,
       num_map = NULL,
-      num_output_other = NULL
+      num_output_other = NULL,
+      audience_matrix = NULL
     ),
 
     #' @field secondary_data Named list of secondary data sources keyed by
@@ -310,13 +312,67 @@ Protocol <- R6::R6Class(
       invisible(self)
     },
 
+    #' @description Remove a tool from the protocol safely.
+    #'
+    #' Removes the tool stored under `tool_name` in `self$tools`.
+    #' After removal, the protocol state is synced, timestamps updated,
+    #' and coherence re-diagnosed.
+    #' If the tool does not exist, a warning is issued (soft failure).
+    #'
+    #' @param tool_name Character. Name/key of the tool to remove.
+    #' @return Invisibly returns self for method chaining.
+    remove_tools = function(tool_name) {
+      phrutils::phr_try(
+        {
+          origin <- "Protocol$remove_tools"
+
+          # Validate input
+          phrutils::phr_assert(
+            is.character(tool_name) &&
+              length(tool_name) == 1 &&
+              nzchar(tool_name),
+            message = phr_txt("tool_name must be a non-empty character string."),
+            origin = origin
+          )
+
+          # Check existence
+          if (is.null(self$tools) || !tool_name %in% names(self$tools)) {
+            phrutils::phr_warning(
+              origin = origin,
+              message = phr_txt("Tool '{tool_name}' is not registered; nothing to remove.")
+            )
+            return(invisible(self))
+          }
+
+          # Remove the tool
+          self$tools[[tool_name]] <- NULL
+
+          # Sync protocol state and timestamps
+          private$..sync_state()
+          private$..touch()
+
+          # Re-run coherence diagnostics
+          self$diagnose_coherence()
+
+          phrutils::phr_message(
+            phr_txt("Tool '{tool_name}' removed from protocol."),
+            origin = origin
+          )
+        },
+        on_error = "abort",
+        origin = "Protocol$remove_tools"
+      )
+
+      invisible(self)
+    },
+
     #' @description Get all issues
     #' @return List of validation issues
     get_issues = function() {
       return(self$issues)
     },
 
-    # ── Tool helpers ────────────────────────────────────────────────────────
+    # ── Tool helpers
 
     #' @description Return the names of all currently registered tools.
     #' @return Character vector of tool names (keys of \code{self$tools}).
@@ -337,6 +393,7 @@ Protocol <- R6::R6Class(
       if (is.null(self$tools) || length(self$tools) == 0) {
         return(FALSE)
       }
+
       isTRUE(tool_name %in% names(self$tools))
     },
 
@@ -604,7 +661,7 @@ Protocol <- R6::R6Class(
             is.character(tool_name) &&
               length(tool_name) == 1 &&
               nzchar(tool_name),
-            message = phr_txt("tool_name must be a non-empty character string"),
+            message = phr_txt("tool_name must be a non-empty character  string"),
             origin = "Protocol$get_dap_table"
           )
 
@@ -623,6 +680,7 @@ Protocol <- R6::R6Class(
       c(
         params,
         list(
+          audience_matrix = private$..sanitize_quarto_df(self$.audience_table_df),
           assessment_title = self$metadata$assessment_title %||% "",
           country_name = self$metadata$country_name %||% "",
           month_year = self$metadata$month_year %||% "",
@@ -640,20 +698,14 @@ Protocol <- R6::R6Class(
           population = self$metadata$population %||% "",
           rationale = self$metadata$rationale %||% "",
           date_pilot_training = self$metadata$date_pilot_training %||% "",
-          date_data_collection_start = self$metadata$date_data_collection_start %||%
-            "",
-          date_data_collection_end = self$metadata$date_data_collection_end %||%
-            "",
+          date_data_collection_start = self$metadata$date_data_collection_start %||% "",
+          date_data_collection_end = self$metadata$date_data_collection_end %||% "",
           date_data_analysis = self$metadata$date_data_analysis %||% "",
           date_data_validation = self$metadata$date_data_validation %||% "",
-          date_preliminary_presentation = self$metadata$date_preliminary_presentation %||%
-            "",
-          date_outputs_validation = self$metadata$date_outputs_validation %||%
-            "",
-          date_outputs_publication = self$metadata$date_outputs_publication %||%
-            "",
-          date_final_presentation = self$metadata$date_final_presentation %||%
-            "",
+          date_preliminary_presentation = self$metadata$date_preliminary_presentation %||% "",
+          date_outputs_validation = self$metadata$date_outputs_validation %||% "",
+          date_outputs_publication = self$metadata$date_outputs_publication %||% "",
+          date_final_presentation = self$metadata$date_final_presentation %||% "",
           audience_type_cluster = self$metadata$audience_type_cluster %||% "",
           expected_output_cluster = self$metadata$expected_output_cluster %||%
             "",
@@ -681,36 +733,11 @@ Protocol <- R6::R6Class(
           visibility_other = self$metadata$visibility_other %||% "",
           created_date = self$metadata$created_date %||% NULL,
           modified_datetime = self$metadata$modified_datetime %||% NULL,
-          month_year = self$metadata$month_year %||% NULL,
-          country_name = self$metadata$country_name %||% NULL,
-          assessment_title = self$metadata$assessment_title %||% NULL,
           target_strata = self$metadata$target_strata %||% list(),
-          protocol_version = self$metadata$protocol_version %||% "1.0",
-          version = self$metadata$version %||% 1L,
+
           mandating_body = self$metadata$mandating_body %||% NULL,
-          project_code = self$metadata$project_code %||% NULL,
           overall_timeframe = self$metadata$overall_timeframe %||% NULL,
-          pilot_date = self$metadata$pilot_date %||% NULL,
-          data_start_date = self$metadata$data_start_date %||% NULL,
-          data_end_date = self$metadata$data_end_date %||% NULL,
-          analysis_date = self$metadata$analysis_date %||% NULL,
-          data_validation_date = self$metadata$data_validation_date %||% NULL,
-          prelim_presentation_date = self$metadata$prelim_presentation_date %||%
-            NULL,
-          output_validation_date = self$metadata$output_validation_date %||%
-            NULL,
-          output_published_date = self$metadata$output_published_date %||% NULL,
-          final_presentation_date = self$metadata$final_presentation_date %||%
-            NULL,
-          date_milestone_donor = self$metadata$date_milestone_donor %||% NULL,
-          date_milestone_intercluster = self$metadata$date_milestone_intercluster %||%
-            NULL,
-          date_milestone_cluster = self$metadata$date_milestone_cluster %||%
-            NULL,
-          date_milestone_ngo_platform = self$metadata$date_milestone_ngo_platform %||%
-            NULL,
-          date_milestone_other = self$metadata$date_milestone_other %||% NULL,
-          geographic_coverage = self$metadata$geographic_coverage %||% NULL,
+
           stratification = self$metadata$stratification %||% NULL,
           num_report = self$metadata$num_report %||% NULL,
           num_profile = self$metadata$num_profile %||% NULL,
@@ -723,8 +750,8 @@ Protocol <- R6::R6Class(
           num_webmap = self$metadata$num_webmap %||% NULL,
           num_map = self$metadata$num_map %||% NULL,
           num_output_other = self$metadata$num_output_other %||% NULL,
-          objectives_research_questions_df = self$.objectives_research_questions_df,
-          secondary_data_sources_df = self$.secondary_data_sources_df,
+          objectives_research_questions_df = private$..sanitize_quarto_df(self$.objectives_research_questions_df),
+          secondary_data_sources_df = private$..sanitize_quarto_df(self$.secondary_data_sources_df),
           modified_framework_svg = self$.modified_framework_svg
         )
       )
@@ -740,6 +767,7 @@ Protocol <- R6::R6Class(
       Sys.Date()
     },
 
+    #' @field .objectives_research_questions_df Returns a table of pillars, sub-pillars, objectives, and research questions linked to indicators used across tools.
     .objectives_research_questions_df = function(value) {
       all_codes <- character(0)
 
@@ -784,10 +812,10 @@ Protocol <- R6::R6Class(
 
       if (is.null(ob) || is.null(ib) || length(all_codes) == 0) {
         table <- data.frame(
-          Pillar = character(0),
-          `Sub-Pillar` = character(0),
-          Objective = character(0),
-          `Research Question` = character(0),
+          Pillar = NA_character_,
+          `Sub-Pillar` = NA_character_,
+          Objective = NA_character_,
+          `Research Question` = NA_character_,
           check.names = FALSE,
           stringsAsFactors = FALSE
         )
@@ -803,6 +831,8 @@ Protocol <- R6::R6Class(
 
       ob_sub <- ob[ob$objective_code %in% objective_codes, , drop = FALSE]
 
+
+
       table <- unique(
         data.frame(
           Pillar = ob_sub$pillar,
@@ -814,9 +844,25 @@ Protocol <- R6::R6Class(
         )
       )
 
+      print(paste0("num row 1: ", nrow(table)))
+
+      if(nrow(table) == 0) {
+        table <- data.frame(
+          Pillar = NA_character_,
+          `Sub-Pillar` = NA_character_,
+          Objective = NA_character_,
+          `Research Question` = NA_character_,
+          check.names = FALSE,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      print(paste0("num row 2: ", nrow(table)))
+
       table
     },
 
+    #' @field .secondary_data_sources_df Returns the framework secondary data sources table.
     .secondary_data_sources_df = function(value) {
       if (!missing(value)) {
         return(invisible(FALSE))
@@ -831,8 +877,20 @@ Protocol <- R6::R6Class(
         error = function(e) NULL
       )
 
+      if(is.null(table)) {
+        table <- data.frame(
+          objective = NA_character_,
+          source = NA_character_,
+          purpose = NA_character_,
+          check.names = FALSE,
+          stringsAsFactors = FALSE
+        )
+
+      }
+
       return(table)
     },
+
     #' @field .modified_framework_svg Active binding returning a temporary SVG
     #'   file path created from \code{framework$adjusted_svg}; falls back to
     #'   \code{framework$master_svg} when adjusted SVG is unavailable.
@@ -874,18 +932,46 @@ Protocol <- R6::R6Class(
       writeLines(svg_text[[1L]], con = tmp_svg)
 
       normalizePath(tmp_svg, winslash = "/", mustWork = TRUE)
+    },
+
+    #' @field .audience_table_df Returns the protocol's audience matrix table
+    #'   (\code{metadata$audience_matrix}), falling back to a single-row
+    #'   placeholder table of \code{NA} values when it has not been populated.
+    .audience_table_df = function(value) {
+      if (!missing(value)) {
+        return(invisible(FALSE))
+      }
+
+      if (is.null(self$metadata$audience_matrix)) {
+
+        table <- data.frame(
+          AudienceType = NA_character_,
+          Audience = NA_character_,
+          ExpectedOutputs = NA_character_,
+          OutputCounts = NA_real_,
+          Dissemination = NA_character_,
+          Access = NA_character_,
+          Visibility = NA_character_,
+          stringsAsFactors = FALSE
+        )
+
+      } else {
+        table <- self$metadata$audience_matrix
+      }
+
+      return(table)
     }
+
   ),
 
   private = list(
-    #' @description Check whether a tool with a specific role exists.
-    #'   Uses \code{access_nested()} to query tools by role and verify that
-    #'   a tool with that role exists and has a valid name.
-    #' @param role Character. Role identifier to check for tool availability.
-    #' @return Logical. \code{TRUE} if a tool with the specified role exists
-    #'   and has a valid name, \code{FALSE} otherwise.
-    #' @keywords internal
-    #' @noRd
+    # @description Check whether a tool with a specific role exists.
+    #   Uses \code{access_nested()} to query tools by role and verify that
+    #   a tool with that role exists and has a valid name.
+    # @param role Character. Role identifier to check for tool availability.
+    # @return Logical. \code{TRUE} if a tool with the specified role exists
+    #   and has a valid name, \code{FALSE} otherwise.
+    # @keywords internal
     ..has_tool_role = function(role) {
       out <- tryCatch(
         self$access_nested(
@@ -899,11 +985,10 @@ Protocol <- R6::R6Class(
       is.character(out) && length(out) == 1L && nzchar(out)
     },
 
-    #' @description Collect unique indicator codes from included revised tools.
-    #' @param tool_names Optional character vector of tool names to query.
-    #' @return Character vector of unique indicator codes.
-    #' @keywords internal
-    #' @noRd
+    # @description Collect unique indicator codes from included revised tools.
+    # @param tool_names Optional character vector of tool names to query.
+    # @return Character vector of unique indicator codes.
+    # @keywords internal
     ..get_tool_indicator_codes = function(
       tool_names = NULL
     ) {
@@ -972,12 +1057,11 @@ Protocol <- R6::R6Class(
       invisible(NULL)
     },
 
-    #' @description Build a data analysis plan table from framework primary
-    #'   objectives and specified tool survey data.
-    #' @param tool_name Character. Tool name for survey/choices lookup.
-    #' @return Data frame with DAP columns or NULL when missing dependencies.
-    #' @keywords internal
-    #' @noRd
+    # @description Build a data analysis plan table from framework primary
+    #   objectives and specified tool survey data.
+    # @param tool_name Character. Tool name for survey/choices lookup.
+    # @return Data frame with DAP columns or NULL when missing dependencies.
+    # @keywords internal
     ..build_dap_table = function(tool_name, lang = "en") {
       # 1. Check framework availability
       if (is.null(self$framework) || !inherits(self$framework, "Framework")) {
@@ -1131,16 +1215,15 @@ Protocol <- R6::R6Class(
       )
     },
 
-    #' @description Construct DAP table rows from survey and framework data.
-    #' @param survey_df Filtered survey data frame.
-    #' @param choices_df Choices data frame (may be NULL).
-    #' @param indicator_bank Data frame from the master indicator bank, filtered
-    #'   to indicators used in the survey.
-    #' @param lang Language code for label columns (e.g. \code{"en"}, \code{"fr"}).
-    #' @return Data frame with DAP structure, without an indicator_code column,
-    #'   or \code{NULL} when no rows can be constructed.
-    #' @keywords internal
-    #' @noRd
+    # @description Construct DAP table rows from survey and framework data.
+    # @param survey_df Filtered survey data frame.
+    # @param choices_df Choices data frame (may be NULL).
+    # @param indicator_bank Data frame from the master indicator bank, filtered
+    #   to indicators used in the survey.
+    # @param lang Language code for label columns (e.g. \code{"en"}, \code{"fr"}).
+    # @return Data frame with DAP structure, without an indicator_code column,
+    #   or \code{NULL} when no rows can be constructed.
+    # @keywords internal
     ..construct_dap_rows = function(
       survey_df,
       choices_df,
@@ -1152,15 +1235,32 @@ Protocol <- R6::R6Class(
       for (i in seq_len(nrow(survey_df))) {
         row <- survey_df[i, , drop = FALSE]
 
-        # Skip calculate question types
+        # Skip non-question XLSForm types
         qtype <- if ("type" %in% names(row)) {
           tolower(trimws(as.character(row$type)))
         } else {
           ""
         }
-        if (qtype == "calculate") {
+
+        skip_types <- c(
+          "begin_repeat",
+          "end_repeat",
+          "begin_group",
+          "end_group",
+          "calculate",
+          "start",
+          "end",
+          "today",
+          "deviceid",
+          "audit",
+          "geopoint",
+          "gps"
+        )
+
+        if (qtype %in% skip_types) {
           next
         }
+
 
         row_ind_codes <- as.character(row$indicator_code)
         if (is.na(row_ind_codes) || !nzchar(row_ind_codes)) {
@@ -1180,11 +1280,6 @@ Protocol <- R6::R6Class(
           matched_code[1L]
         } else {
           row_ind_codes[1L]
-        }
-
-        # Skip rows whose indicator_code ends in "00"
-        if (grepl("00$", ind_code)) {
-          next
         }
 
         # Lookup the matching row in indicator_bank by indicator_code
@@ -1273,13 +1368,12 @@ Protocol <- R6::R6Class(
       do.call(rbind, rows)
     },
 
-    #' @description Extract formatted response options for a survey question.
-    #' @param question_row Single-row survey data frame
-    #' @param choices_df Choices data frame (may be NULL)
-    #' @param lang Language code (default: "en")
-    #' @return Character string with responses (newline-separated for select types)
-    #' @keywords internal
-    #' @noRd
+    # @description Extract formatted response options for a survey question.
+    # @param question_row Single-row survey data frame
+    # @param choices_df Choices data frame (may be NULL)
+    # @param lang Language code (default: "en")
+    # @return Character string with responses (newline-separated for select types)
+    # @keywords internal
     ..extract_question_responses = function(
       question_row,
       choices_df,
@@ -1293,6 +1387,14 @@ Protocol <- R6::R6Class(
 
       # For select questions, extract from choices
       if (grepl("^select_one ", qtype) || grepl("^select_multiple ", qtype)) {
+
+        # Administrative and cluster lists should be manually contextualized
+        if (grepl(
+          "^select_one\\s+(admin1|admin2|admin3|admin4|cluster)$",
+          qtype
+        )) {
+          return("[Insert contextualized list of response options here]")
+        }
         list_name <- sub("^select_(one|multiple)\\s+", "", qtype)
         list_name <- gsub("\\s+.*$", "", list_name) # Remove anything after list name
 
@@ -1341,6 +1443,16 @@ Protocol <- R6::R6Class(
       # For integer/decimal, return "Enter number"
       if (qtype %in% c("integer", "decimal")) {
         return("Enter number")
+      }
+
+      # For image type, return "Take image"
+      if (qtype %in% c("image")) {
+        return("Take image")
+      }
+
+      # For note type, return "Read note"
+      if (qtype %in% c("note")) {
+        return("Read note")
       }
 
       # For date types

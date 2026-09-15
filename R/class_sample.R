@@ -184,10 +184,12 @@ Sample <- R6::R6Class(
       )
 
       site_selection_methods <- c(
-        "simple_random",
+        "simple_random_even",
+        "simple_random_proportional",
         "proportional",
         "cluster",
-        "systematic",
+        "systematic_even",
+        "systematic_proportional",
         "purposive"
       )
       phrutils::phr_assert(
@@ -198,15 +200,15 @@ Sample <- R6::R6Class(
         origin = "Sample$add_stratum"
       )
 
-      if (sampling_method_site %in% site_selection_methods) {
-        phrutils::phr_assert(
-          !is.null(n_sites) && !is.na(n_sites),
-          message = phr_txt(
-            "n_sites is required for sampling_method '{sampling_method_site}'."
-          ),
-          origin = "Sample$add_stratum"
-        )
-      }
+      # if (sampling_method_site %in% site_selection_methods) {
+      #   phrutils::phr_assert(
+      #     !is.null(n_sites) && !is.na(n_sites),
+      #     message = phr_txt(
+      #       "n_sites is required for sampling_method '{sampling_method_site}'."
+      #     ),
+      #     origin = "Sample$add_stratum"
+      #   )
+      # }
 
       # Default household sampling method if NULL or missing
       if (is.null(sampling_method_hh) || is.na(sampling_method_hh)) {
@@ -376,8 +378,6 @@ Sample <- R6::R6Class(
     },
 
     #' @description Return unique sampling methods in the sample table.
-
-    #' @description Return unique sampling methods in the sample table.
     #' @param type Character specifying method type: "site" or "household" (default: "site").
     #' @return Character vector of unique sampling methods.
     get_sampling_methods = function(type = c("site", "household")) {
@@ -418,20 +418,18 @@ Sample <- R6::R6Class(
     }
   ),
   private = list(
-    #' @description Update modified timestamp.
-    #' @return Invisibly returns NULL.
-    #' @keywords internal
-    #' @noRd
+    # @description Update modified timestamp.
+    # @return Invisibly returns NULL.
+    # @keywords internal
     ..touch = function() {
       self$metadata$modified_datetime <- Sys.time()
       invisible(NULL)
     },
 
-    #' @description Resolve the stratum name column from a sample table.
-    #' @param st Data frame sample table.
-    #' @return Character scalar naming the column, or NULL if not found.
-    #' @keywords internal
-    #' @noRd
+    # @description Resolve the stratum name column from a sample table.
+    # @param st Data frame sample table.
+    # @return Character scalar naming the column, or NULL if not found.
+    # @keywords internal
     ..resolve_stratum_name_col = function(st) {
       if ("stratum_name" %in% names(st)) {
         "stratum_name"

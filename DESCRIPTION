@@ -81,7 +81,6 @@ Collate:
     'class_framework.R'
     'class_household_tool.R'
     'class_integrated_analysis.R'
-    'class_iphra_protocol.R'
     'class_key_informant_tool.R'
     'class_log.R'
     'class_observation_tool.R'
@@ -113,4 +112,4 @@ Collate:
     'utils_sampling_frame.R'
     'utils_tool_selection.R'
     'utils_tools_validation.R'
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0
