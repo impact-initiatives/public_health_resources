@@ -1929,6 +1929,7 @@ Data <- R6::R6Class(
       by_self_role,
       by_other_role
     ) {
+      private$..phr_try({
       if (missing(name) || !is.character(name) || length(name) != 1) {
         phrutils::phr_error(
           private$..dataset_name,
@@ -1971,6 +1972,10 @@ Data <- R6::R6Class(
       )
 
       invisible(TRUE)
+      },
+      on_error = "abort",
+      origin = paste0(private$..dataset_name, "$add_linked_dataset")
+      )
     },
 
     # Data Analytics Generation Hook
@@ -3611,12 +3616,15 @@ Data <- R6::R6Class(
 
       # Check if function exists
 
-      if (!exists(func_name, mode = "function")) {
+      ind_fun <- .resolve_indicator_function(func_name)
+
+      if (is.null(ind_fun)) {
 
         private$..touch(
           log = TRUE, touch = FALSE, display = FALSE,
           name = paste0(private$..dataset_name, "$standardize$indicator$", ind_name),
-          message = private$..phr_txt("Indicator '{ind_name}' skipped: function '{func_name}' not found.")
+          message = private$..phr_txt("Indicator '{ind_name}' skipped: function '{func_name}' not found."),
+          level = "warning"
         )
 
         phrutils::phr_warning(
@@ -3653,7 +3661,7 @@ Data <- R6::R6Class(
 
       ind_result <- tryCatch(
         do.call(
-          func_name,
+          ind_fun,
           func_args
         ),
         error = function(e) {
@@ -4525,10 +4533,7 @@ Data <- R6::R6Class(
 
                         cond_if <- private$..phr_try(
                           {
-                            out <- with(
-                              df,
-                              eval(parse(text = rule_if_translated))
-                            )
+                            out <- ..eval_rule_expression(rule_if_translated, df)
                             if (!is.logical(out)) {
                               rep(FALSE, nrow(df))
                             } else if (length(out) == 1) {
@@ -4572,10 +4577,7 @@ Data <- R6::R6Class(
 
                           cond_then <- private$..phr_try(
                             {
-                              out <- with(
-                                df,
-                                eval(parse(text = rule_then_translated))
-                              )
+                              out <- ..eval_rule_expression(rule_then_translated, df)
                               if (!is.logical(out)) {
                                 rep(FALSE, nrow(df))
                               } else if (length(out) == 1) {
@@ -7329,3 +7331,30 @@ Data <- R6::R6Class(
 
     )
   )
+
+
+# Evaluates a dependency rule expression against a data frame. Exported phrutils
+# helpers (e.g. is_greater_than_one_selection) are made visible because phrutils
+# is only imported by namespace, not attached, so bare calls would not resolve.
+..eval_rule_expression <- function(expr_text, df) {
+  enclos <- new.env(parent = topenv())
+  ns <- asNamespace("phrutils")
+  fns <- getNamespaceExports("phrutils")
+  list2env(mget(fns, envir = ns, inherits = FALSE), envir = enclos)
+  eval(parse(text = expr_text), envir = df, enclos = enclos)
+}
+
+# Resolve an indicator function by name, checking phrindicators first, then
+# phrutils and the calling environment. Returns NULL when not found.
+.resolve_indicator_function <- function(func_name) {
+  for (pkg in c("phrindicators", "phrutils")) {
+    if (requireNamespace(pkg, quietly = TRUE) &&
+        func_name %in% getNamespaceExports(pkg)) {
+      return(getExportedValue(pkg, func_name))
+    }
+  }
+  if (exists(func_name, mode = "function")) {
+    return(get(func_name, mode = "function"))
+  }
+  NULL
+}
